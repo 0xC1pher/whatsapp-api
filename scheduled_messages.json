@@ -1,0 +1,12 @@
+[
+    {
+      "number": "0412 555 55 55",
+      "message": "Hola, este es un mensaje programado.",
+      "scheduled_at": "2025-01-25T15:00:00Z"
+    },
+    {
+      "number": "0414 555 55 55",
+      "message": "Buenos días, este es otro mensaje programado.",
+      "scheduled_at": "2025-01-25T16:00:00Z"
+    }
+  ]

@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -21,46 +24,84 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// MessageRequest represents the structure of the request body
+// MessageRequest representa la estructura del cuerpo de la solicitud
 type MessageRequest struct {
 	Number  string `json:"number"`
 	Message string `json:"message"`
 }
 
-// Credentials structure to hold username and password
+// Credentials estructura para almacenar credenciales
 type Credentials struct {
-	Username string
-	Password string
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
-// Global variable to hold credentials
-var validCredentials Credentials
+// ScheduledMessage representa un mensaje programado
+type ScheduledMessage struct {
+	Number      string    `json:"number"`
+	Message     string    `json:"message"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+}
 
-// LoadCredentials reads the username and password from a file
-func LoadCredentials(filePath string) error {
-	data, err := ioutil.ReadFile(filePath)
+// Variables globales
+var validCredentials Credentials
+var scheduledMessages []ScheduledMessage
+
+// LoadCredentialsFromJSON carga credenciales desde un archivo JSON
+func LoadCredentialsFromJSON(filePath string) (Credentials, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return Credentials{}, err
+	}
+	defer file.Close()
+
+	var credentials Credentials
+	err = json.NewDecoder(file).Decode(&credentials)
+	return credentials, err
+}
+
+// SaveCredentialsToJSON guarda credenciales en un archivo JSON
+func SaveCredentialsToJSON(filePath string, credentials Credentials) error {
+	file, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	// Assuming credentials are in "username:password" format
-	parts := strings.TrimSpace(string(data))
-	credentialParts := strings.Split(parts, ":")
-	if len(credentialParts) != 2 {
-		return fmt.Errorf("invalid credentials format in file")
-	}
-
-	validCredentials = Credentials{
-		Username: credentialParts[0],
-		Password: credentialParts[1],
-	}
-
-	return nil
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(credentials)
 }
 
-// SendMessage handles sending a message
+// LoadScheduledMessages carga mensajes programados desde un archivo JSON
+func LoadScheduledMessages(filePath string) ([]ScheduledMessage, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var messages []ScheduledMessage
+	err = json.NewDecoder(file).Decode(&messages)
+	return messages, err
+}
+
+// SaveScheduledMessages guarda mensajes programados en un archivo JSON
+func SaveScheduledMessages(filePath string, messages []ScheduledMessage) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(messages)
+}
+
+// SendMessage maneja el envío de mensajes
 func SendMessage(g *gin.Context, client *whatsmeow.Client) {
-	// Check Authorization header
+	// Verificar el encabezado de autorización
 	if !validateBasicAuth(g) {
 		return
 	}
@@ -86,14 +127,14 @@ func SendMessage(g *gin.Context, client *whatsmeow.Client) {
 	g.JSON(http.StatusOK, gin.H{"response": "Sent to " + jsonBody.Number + ": " + jsonBody.Message})
 }
 
-// RecvMessage handles receiving a message
+// RecvMessage maneja la recepción de mensajes
 func RecvMessage(g *gin.Context) {
-	// Check Authorization header
+	// Verificar el encabezado de autorización
 	if !validateBasicAuth(g) {
 		return
 	}
 
-	number := g.Query("number") // Retrieve the "number" query parameter
+	number := g.Query("number") // Recuperar el parámetro "number" de la consulta
 
 	if number == "" {
 		g.JSON(http.StatusBadRequest, gin.H{"error": "number parameter is required"})
@@ -103,7 +144,7 @@ func RecvMessage(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"message": "Received number: " + number})
 }
 
-// validateBasicAuth checks the Authorization header for Basic Auth
+// validateBasicAuth verifica el encabezado de autorización para Basic Auth
 func validateBasicAuth(g *gin.Context) bool {
 	authHeader := g.GetHeader("Authorization")
 	if authHeader == "" {
@@ -111,7 +152,7 @@ func validateBasicAuth(g *gin.Context) bool {
 		return false
 	}
 
-	// Extract the token from the header
+	// Extraer el token del encabezado
 	token := strings.TrimPrefix(authHeader, "Basic ")
 	decoded, err := base64.StdEncoding.DecodeString(token)
 	if err != nil {
@@ -119,7 +160,7 @@ func validateBasicAuth(g *gin.Context) bool {
 		return false
 	}
 
-	// Split the decoded string into username and password
+	// Dividir la cadena decodificada en usuario y contraseña
 	credentials := strings.Split(string(decoded), ":")
 	if len(credentials) != 2 || !validateCredentials(credentials[0], credentials[1]) {
 		g.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
@@ -129,41 +170,33 @@ func validateBasicAuth(g *gin.Context) bool {
 	return true
 }
 
-// validateCredentials checks the provided username and password against the loaded credentials
+// validateCredentials verifica las credenciales proporcionadas
 func validateCredentials(username, password string) bool {
 	return username == validCredentials.Username && password == validCredentials.Password
 }
 
-// IsNumeric checks if a string is a valid number
+// IsNumeric verifica si una cadena es un número válido
 func IsNumeric(s string) bool {
 	_, err := strconv.ParseFloat(s, 64)
 	return err == nil
 }
 
-// sendMessageWA sends a message via WhatsApp
+// sendMessageWA envía un mensaje de WhatsApp
 func sendMessageWA(client *whatsmeow.Client, recipient string, messageText string) error {
-	// Create a message
 	message := &waProto.Message{
 		Conversation: proto.String(messageText),
 	}
 
-	log.Println("Sending to " + recipient + " with message: " + messageText)
-	// Convert the recipient number into the correct WhatsApp format (JID)
 	jid, err := types.ParseJID(recipient)
 	if err != nil {
 		return err
 	}
 
-	// Send the message
 	_, err = client.SendMessage(context.Background(), jid, message)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
-// eventHandler handles WhatsApp events
+// eventHandler maneja eventos de WhatsApp
 func eventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
@@ -171,7 +204,7 @@ func eventHandler(evt interface{}) {
 	}
 }
 
-// LoginWhatsapp logs into WhatsApp Web
+// LoginWhatsapp inicia sesión en WhatsApp Web
 func LoginWhatsapp() *whatsmeow.Client {
 	dbLog := waLog.Stdout("Database", "DEBUG", true)
 	container, err := sqlstore.New("sqlite3", "file:filestore.db?_foreign_keys=on", dbLog)
@@ -187,7 +220,7 @@ func LoginWhatsapp() *whatsmeow.Client {
 	client.AddEventHandler(eventHandler)
 
 	if client.Store.ID == nil {
-		// No ID stored, new login
+		// No ID almacenado, nuevo inicio de sesión
 		qrChan, _ := client.GetQRChannel(context.Background())
 		err = client.Connect()
 		if err != nil {
@@ -201,7 +234,7 @@ func LoginWhatsapp() *whatsmeow.Client {
 			}
 		}
 	} else {
-		// Already logged in, just connect
+		// Ya iniciado sesión, solo conectar
 		err = client.Connect()
 		if err != nil {
 			panic(err)
@@ -211,16 +244,40 @@ func LoginWhatsapp() *whatsmeow.Client {
 	return client
 }
 
+// ScheduleMessagesProgrammed programa y envía mensajes programados
+func ScheduleMessagesProgrammed(client *whatsmeow.Client) {
+	for _, msg := range scheduledMessages {
+		time.Sleep(time.Until(msg.ScheduledAt)) // Esperar hasta la hora programada
+		err := sendMessageWA(client, msg.Number, msg.Message)
+		if err != nil {
+			log.Printf("Error sending scheduled message: %v", err)
+		} else {
+			log.Printf("Scheduled message sent to %s: %s", msg.Number, msg.Message)
+		}
+	}
+}
+
 func main() {
 	port := "45981"
-	// Load credentials from file
-	err := LoadCredentials("credentials.txt")
+
+	// Cargar credenciales desde un archivo JSON
+	credentials, err := LoadCredentialsFromJSON("credentials.json")
 	if err != nil {
 		panic("Failed to load credentials: " + err.Error())
+	}
+	validCredentials = credentials
+
+	// Cargar mensajes programados desde un archivo JSON
+	scheduledMessages, err = LoadScheduledMessages("scheduled_messages.json")
+	if err != nil {
+		panic("Failed to load scheduled messages: " + err.Error())
 	}
 
 	gin.SetMode(gin.ReleaseMode)
 	clientWhatsapp := LoginWhatsapp()
+
+	// Iniciar el envío de mensajes programados
+	go ScheduleMessagesProgrammed(clientWhatsapp)
 
 	r := gin.Default()
 	v1 := r.Group("/api/v1")
