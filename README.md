@@ -40,7 +40,7 @@ Este proyecto es una API REST que permite enviar y recibir mensajes de WhatsApp 
     "message": "Hola, este es un mensaje de prueba"
   }
 
-  | Aspecto                | implementación con `whatsmeow` | API principal de Meta |
+| Aspecto                | implementación con `whatsmeow`   | API principal de Meta |
 |------------------------|----------------------------------|-----------------------|
 | **Enfoque**            | WhatsApp Web                     | WhatsApp Business API |
 | **Autenticación**      | Código QR                        | Token de acceso       |
