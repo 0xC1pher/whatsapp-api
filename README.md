@@ -1,4 +1,4 @@
-# 🚀 WhatsApp Sender API
+# 🚀 WhatsApp API
 
 Este proyecto es una API REST que permite enviar y recibir mensajes de WhatsApp utilizando la biblioteca [whatsmeow](https://github.com/tulir/whatsmeow).
 
